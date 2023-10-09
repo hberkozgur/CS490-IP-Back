@@ -2,7 +2,9 @@ const express = require('express')
 const cors = require('cors');
 const mysql = require('mysql')
 const bodyParser = require('body-parser');
-
+const PDFDocument = require('pdfkit');
+const axios = require('axios');
+const fs = require('fs');
 const app = express();
 
 
@@ -28,6 +30,42 @@ const db = mysql.createConnection({
     }
     console.log('Connected to the database');
   });
+
+
+
+
+
+app.get('/generate-pdf-report', async (req, res) => {
+  try {
+    // Fetch customer data from your /customers endpoint
+    const response = await axios.get('http://localhost:4000/customers');
+    const customers = response.data;
+
+    const doc = new PDFDocument();
+
+    // Pipe the PDF to the response
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename=customer_report.pdf');
+    doc.pipe(res);
+
+    // Add content to the PDF (e.g., list of customers who rented movies)
+    doc.fontSize(12).text('Customer Report', { align: 'center' });
+
+    // Add customer data to the PDF
+    doc.moveDown(); // Move down a line
+    doc.text('List of Customers:', { underline: true });
+
+    customers.forEach((customer, index) => {
+      doc.text(`${index + 1}. ${customer.first_name} ${customer.last_name} (${customer.email})`);
+    });
+
+    // End the document
+    doc.end();
+  } catch (error) {
+    console.error('Error fetching customer data:', error);
+    res.status(500).json({ error: 'Error fetching customer data' });
+  }
+});
 
   app.get('/movies', (req, res) => {
     const q = 
@@ -163,13 +201,13 @@ app.get('/actors', (req, res) => {
     film.description, 
     category.name AS genre,
     GROUP_CONCAT(CONCAT(actor.first_name, ' ', actor.last_name) SEPARATOR ', ') AS actors
-FROM film
-INNER JOIN film_category ON film.film_id = film_category.film_id
-INNER JOIN category ON film_category.category_id = category.category_id
-INNER JOIN film_actor ON film.film_id = film_actor.film_id
-INNER JOIN actor ON film_actor.actor_id = actor.actor_id
-WHERE film.film_id = ?
-GROUP BY film.film_id, film.title, film.description, category.name; -- Include category.name in GROUP BY
+    FROM film
+    INNER JOIN film_category ON film.film_id = film_category.film_id
+    INNER JOIN category ON film_category.category_id = category.category_id
+    INNER JOIN film_actor ON film.film_id = film_actor.film_id
+    INNER JOIN actor ON film_actor.actor_id = actor.actor_id
+    WHERE film.film_id = ?
+    GROUP BY film.film_id, film.title, film.description, category.name; -- Include category.name in GROUP BY
 
     `;
   
@@ -195,11 +233,11 @@ GROUP BY film.film_id, film.title, film.description, category.name; -- Include c
   
     // SQL query to retrieve rented movies for the customer
     const query = `
-      SELECT film.title
+      SELECT film.film_id, film.title
       FROM rental
       INNER JOIN inventory ON rental.inventory_id = inventory.inventory_id
       INNER JOIN film ON inventory.film_id = film.film_id
-      WHERE rental.customer_id = ?
+      WHERE rental.customer_id = ?;
     `;
   
     // Execute the query with the customer ID as a parameter
@@ -231,6 +269,112 @@ GROUP BY film.film_id, film.title, film.description, category.name; -- Include c
       res.json(data[0]);
     });
   });
+  // Add a new route for deleting a customer
+  app.delete('/customers/:customerId', (req, res) => {
+    const customerId = req.params.customerId;
+  
+    // First, delete related records in the payment table
+    const deletePaymentsQuery = `DELETE FROM payment WHERE customer_id = ?`;
+    db.query(deletePaymentsQuery, [customerId], (paymentErr, paymentData) => {
+      if (paymentErr) {
+        console.error('Error deleting payments for the customer: ' + paymentErr.stack);
+        return res.status(500).json({ error: 'Database error' });
+      }
+  
+      // Now, delete the customer
+      const deleteCustomerQuery = `DELETE FROM customer WHERE customer_id = ?`;
+      db.query(deleteCustomerQuery, [customerId], (customerErr, customerData) => {
+        if (customerErr) {
+          console.error('Error deleting customer from the database: ' + customerErr.stack);
+          return res.status(500).json({ error: 'Database error' });
+        }
+  
+        if (customerData.affectedRows === 0) {
+          return res.status(404).json({ error: 'Customer not found' });
+        }
+  
+        // Customer and related payment records deleted successfully
+        res.json({ message: 'Customer and related payment records deleted successfully' });
+      });
+    });
+  });
+  
+// Add a new route for returning a rented movie
+app.put('/customers/:customerId/return-movie/:movieId', (req, res) => {
+  const customerId = req.params.customerId;
+  const movieId = req.params.movieId;
+
+  // Start a transaction to ensure atomicity
+  db.beginTransaction((err) => {
+    if (err) {
+      console.error('Error starting a database transaction: ' + err.stack);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    // First, check if the rental record exists and is still rented (return_date is NULL)
+    const checkRentalQuery = `
+    SELECT rental.rental_id
+    FROM rental
+    INNER JOIN inventory ON rental.inventory_id = inventory.inventory_id
+    WHERE rental.customer_id = ${customerId}
+      AND inventory.film_id = ${movieId}
+      AND rental.return_date IS NULL;
+    `;
+
+    db.query(checkRentalQuery, [customerId, movieId], (rentalErr, rentalData) => {
+      if (rentalErr) {
+        console.error('Error checking rental record: ' + rentalErr.stack);
+        db.rollback(() => {
+          console.error('Transaction rolled back due to an error.');
+          return res.status(500).json({ error: 'Database error' });
+        });
+      }
+
+      if (rentalData.length === 0) {
+        // No valid rental record found
+        db.rollback(() => {
+          console.error('No valid rental record found.');
+          return res.status(404).json({ error: 'No valid rental record found' });
+        });
+      } else {
+        // Valid rental record found, proceed to update the return_date
+        const updateRentalQuery = `
+          UPDATE rental
+          SET return_date = NOW()
+          WHERE customer_id = ? 
+            AND inventory_id IN (SELECT inventory_id FROM inventory WHERE film_id = ?)
+            AND return_date IS NULL
+        `;
+
+        db.query(updateRentalQuery, [customerId, movieId], (updateErr, updateData) => {
+          if (updateErr) {
+            console.error('Error updating rental record: ' + updateErr.stack);
+            db.rollback(() => {
+              console.error('Transaction rolled back due to an error.');
+              return res.status(500).json({ error: 'Database error' });
+            });
+          }
+
+          // Commit the transaction if everything is successful
+          db.commit((commitErr) => {
+            if (commitErr) {
+              console.error('Error committing the transaction: ' + commitErr.stack);
+              db.rollback(() => {
+                console.error('Transaction rolled back due to an error.');
+                return res.status(500).json({ error: 'Database error' });
+              });
+            }
+
+            // Rental record updated successfully
+            res.json({ message: 'Rental record updated successfully' });
+          });
+        });
+      }
+    });
+  });
+});
+
+
   
   // API endpoint to fetch customers
 app.get('/customers', (req, res) => {
@@ -279,12 +423,12 @@ const getNextCustomerId = (callback) => {
   
       // Create the new customer data including the generated customer ID
       const newCustomer = {
+        store_id: '1',
         customer_id: newCustomerId,
         first_name: req.body.first_name,
         last_name: req.body.last_name,
         email: req.body.email,
-        address_id: req.body.address_id,
-        // You may need to include other customer data here
+        address_id: '1'
       };
   
       // Insert the new customer into the database
@@ -295,11 +439,32 @@ const getNextCustomerId = (callback) => {
           return res.status(500).json({ error: 'Database error' });
         }
   
-        return res.json('New Customer is added successfully.');
+        // Send the customer ID in the response
+        return res.json({ customerId: newCustomerId });
       });
     });
   });
   
+  // In your Express server code, add the following route for customer editing:
+
+  app.put('/customers/:customerId/edit', (req, res) => {
+    const customerId = req.params.customerId;
+    const { first_name, last_name, email } = req.body; // Extract data from the request body
+  
+    // Update the customer information in the database
+    const updateQuery = 'UPDATE customer SET first_name = ?, last_name = ?, email = ? WHERE customer_id = ?';
+    db.query(updateQuery, [first_name, last_name, email, customerId], (err, result) => {
+      if (err) {
+        console.error('Error updating customer information:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+  
+      // Return success response
+      return res.json({ success: true, message: 'Customer information updated successfully' });
+    });
+  });
+  
+
   
   // Start the server
   const port = process.env.PORT || 4000;
