@@ -48,7 +48,7 @@ const db = mysql.createConnection({
       res.setHeader('Content-Disposition', 'attachment; filename=customer_report.pdf');
       doc.pipe(res);
   
-      // Add content to the PDF (e.g., list of customer rentals)
+      // Add content to the PDF 
       doc.fontSize(12).text('Customer Rental Report', { align: 'center' });
   
       // Loop through rental data
@@ -341,7 +341,7 @@ app.post('/new_rent', async (req, res) => {
     console.log('customerId:', customerId);
     console.log('staffId:', staffId);
 
-    // Fetch the inventory_id for the specified movie_id in both stores
+
     try {
       const inventoryId = await fetchInventoryId(movieId, customerId);
 
@@ -391,9 +391,6 @@ async function insertRentalRecord(inventoryId, customerId, staffId) {
     console.log('customerId:', customerId);
     console.log('movieId:', movieId);
   
-    // Your SQL query to update the rental record here
-    // You can use the customerId and movieId to find the rental record and mark it as returned
-    // Example query:
     const updateRentalQuery = `
       UPDATE rental
       SET return_date = NOW()
@@ -408,7 +405,6 @@ async function insertRentalRecord(inventoryId, customerId, staffId) {
         return res.status(500).json({ error: 'Database error' });
       }
   
-      // Check if any rows were updated (i.e., rental record marked as returned)
       if (updateData.affectedRows === 0) {
         return res.status(404).json({ error: 'No valid rental record found' });
       }
@@ -524,7 +520,7 @@ const getNextCustomerId = (callback) => {
     });
   });
   
-  // In your Express server code, add the following route for customer editing:
+
 
   app.put('/customers/:customerId/edit', (req, res) => {
     const customerId = req.params.customerId;
