@@ -272,15 +272,14 @@ app.get('/actors', (req, res) => {
       res.json(data[0]);
     });
   });
-  // Add a new route for deleting a customer
   app.delete('/customers/:customerId', (req, res) => {
     const customerId = req.params.customerId;
   
-    // First, delete related records in the payment table
-    const deletePaymentsQuery = `DELETE FROM payment WHERE customer_id = ?`;
-    db.query(deletePaymentsQuery, [customerId], (paymentErr, paymentData) => {
-      if (paymentErr) {
-        console.error('Error deleting payments for the customer: ' + paymentErr.stack);
+    // First, delete related rental records
+    const deleteRentalsQuery = `DELETE FROM rental WHERE customer_id = ?`;
+    db.query(deleteRentalsQuery, [customerId], (rentalErr, rentalData) => {
+      if (rentalErr) {
+        console.error('Error deleting rental records for the customer: ' + rentalErr.stack);
         return res.status(500).json({ error: 'Database error' });
       }
   
@@ -296,11 +295,16 @@ app.get('/actors', (req, res) => {
           return res.status(404).json({ error: 'Customer not found' });
         }
   
-        // Customer and related payment records deleted successfully
-        res.json({ message: 'Customer and related payment records deleted successfully' });
+        // Customer and related rental records deleted successfully
+        res.json({
+          message: 'Customer and related rental records deleted successfully',
+          deletedRentalCount: rentalData.affectedRows,
+        });
       });
     });
   });
+  
+  
 // Function to fetch the inventory_id
 async function fetchInventoryId(movieId, customerId) {
   return new Promise((resolve, reject) => {
