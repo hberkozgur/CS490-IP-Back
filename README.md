@@ -71,3 +71,20 @@ Here are some of the available endpoints:
     /customers: Retrieve a list of customers.
     /add-customer: Add a new customer to the database.
     /customers/:customerId/edit: Edit customer information.
+
+
+5 features that I have tested:
+
+Landing Page:
+- As a user I want to view top 5 rented movies of all times.
+- As a user I want to be able to view top 5 actors that are part of movies that I have in the store.
+
+Movies Page:
+- As a user I want to be able to view details of the film.
+
+Customers Page:
+- As a user I want view list of customers.
+- As a user I want to be able to edit customers details. 
+
+
+    
