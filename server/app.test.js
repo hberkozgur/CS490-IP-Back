@@ -52,3 +52,46 @@ describe('GET /movies', () => {
 
   // Add additional tests for handling invalid movie IDs, 404 responses, etc. as needed
 });
+describe('GET /customers/:customerId', () => {
+  it('responds with JSON containing customer details for a valid customer ID', async () => {
+    // Replace 'validCustomerId' with an actual valid customer ID from your database
+    const validCustomerId = 1;
+
+    const response = await request(app).get(`/customers/${validCustomerId}`);
+    expect(response.status).toBe(200); // Assuming a successful request returns status code 200
+    expect(response.type).toBe('application/json'); // Ensure the response is in JSON format
+
+    const customerDetails = response.body;
+
+    // Add more specific assertions based on your database schema and expected customer details
+    expect(customerDetails).toHaveProperty('customer_id');
+    expect(customerDetails).toHaveProperty('first_name');
+    expect(customerDetails).toHaveProperty('last_name');
+    // Add more assertions for other customer details as needed
+  });
+
+  // Add additional tests for handling invalid customer IDs, 404 responses, etc. as needed
+});
+describe('PUT /customers/:customerId/edit', () => {
+  it('responds with success message after editing customer information', async () => {
+    // Replace 'validCustomerId' with an actual valid customer ID from your database
+    const validCustomerId = 1;
+    const updatedCustomerInfo = {
+      first_name: 'UpdatedFirstName',
+      last_name: 'UpdatedLastName',
+      email: 'updated@example.com',
+    };
+
+    const response = await request(app)
+      .put(`/customers/${validCustomerId}/edit`)
+      .send(updatedCustomerInfo);
+
+    expect(response.status).toBe(200); // Assuming a successful request returns status code 200
+    expect(response.type).toBe('application/json'); // Ensure the response is in JSON format
+
+    const responseBody = response.body;
+    expect(responseBody).toEqual({ success: true, message: 'Customer information updated successfully' });
+  });
+
+  // Add additional tests for handling invalid customer IDs, validation, etc. as needed
+});
