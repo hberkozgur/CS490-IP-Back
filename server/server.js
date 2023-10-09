@@ -275,32 +275,36 @@ app.get('/actors', (req, res) => {
   app.delete('/customers/:customerId', (req, res) => {
     const customerId = req.params.customerId;
   
-    // First, delete related rental records
-    const deleteRentalsQuery = `DELETE FROM rental WHERE customer_id = ?`;
-    db.query(deleteRentalsQuery, [customerId], (rentalErr, rentalData) => {
-      if (rentalErr) {
-        console.error('Error deleting rental records for the customer: ' + rentalErr.stack);
+    // First, check if there are related payment records
+    const checkPaymentsQuery = `SELECT * FROM payment WHERE customer_id = ?`;
+    db.query(checkPaymentsQuery, [customerId], (paymentErr, paymentData) => {
+      if (paymentErr) {
+        console.error('Error checking payment records: ' + paymentErr.stack);
         return res.status(500).json({ error: 'Database error' });
       }
   
-      // Now, delete the customer
-      const deleteCustomerQuery = `DELETE FROM customer WHERE customer_id = ?`;
-      db.query(deleteCustomerQuery, [customerId], (customerErr, customerData) => {
-        if (customerErr) {
-          console.error('Error deleting customer from the database: ' + customerErr.stack);
-          return res.status(500).json({ error: 'Database error' });
-        }
+      if (paymentData.length > 0) {
+        // Handle related payment records (e.g., archive them)
+        // Then proceed with deleting the customer
+      } else {
+        // No related payment records, proceed with deleting the customer
+        const deleteCustomerQuery = `DELETE FROM customer WHERE customer_id = ?`;
+        db.query(deleteCustomerQuery, [customerId], (customerErr, customerData) => {
+          if (customerErr) {
+            console.error('Error deleting customer from the database: ' + customerErr.stack);
+            return res.status(500).json({ error: 'Database error' });
+          }
   
-        if (customerData.affectedRows === 0) {
-          return res.status(404).json({ error: 'Customer not found' });
-        }
+          if (customerData.affectedRows === 0) {
+            return res.status(404).json({ error: 'Customer not found' });
+          }
   
-        // Customer and related rental records deleted successfully
-        res.json({
-          message: 'Customer and related rental records deleted successfully',
-          deletedRentalCount: rentalData.affectedRows,
+          // Customer deleted successfully
+          res.json({
+            message: 'Customer and related rental records deleted successfully',
+          });
         });
-      });
+      }
     });
   });
   
