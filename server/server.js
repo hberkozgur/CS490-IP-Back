@@ -35,37 +35,39 @@ const db = mysql.createConnection({
 
 
 
-app.get('/generate-pdf-report', async (req, res) => {
-  try {
-    // Fetch customer data from your /customers endpoint
-    const response = await axios.get('http://localhost:4000/customers');
-    const customers = response.data;
-
-    const doc = new PDFDocument();
-
-    // Pipe the PDF to the response
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename=customer_report.pdf');
-    doc.pipe(res);
-
-    // Add content to the PDF (e.g., list of customers who rented movies)
-    doc.fontSize(12).text('Customer Report', { align: 'center' });
-
-    // Add customer data to the PDF
-    doc.moveDown(); // Move down a line
-    doc.text('List of Customers:', { underline: true });
-
-    customers.forEach((customer, index) => {
-      doc.text(`${index + 1}. ${customer.first_name} ${customer.last_name} (${customer.email})`);
-    });
-
-    // End the document
-    doc.end();
-  } catch (error) {
-    console.error('Error fetching customer data:', error);
-    res.status(500).json({ error: 'Error fetching customer data' });
-  }
-});
+  app.get('/generate-pdf-report', async (req, res) => {
+    try {
+      // Fetch customer data including rented movies from your /customers_rents endpoint
+      const response = await axios.get('http://localhost:4000/customers_rents');
+      const rentalData = response.data;
+  
+      const doc = new PDFDocument();
+  
+      // Pipe the PDF to the response
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', 'attachment; filename=customer_report.pdf');
+      doc.pipe(res);
+  
+      // Add content to the PDF (e.g., list of customer rentals)
+      doc.fontSize(12).text('Customer Rental Report', { align: 'center' });
+  
+      // Loop through rental data
+      rentalData.forEach((rental, index) => {
+        doc.moveDown(); // Move down a line
+        doc.text(`${index + 1}. Customer: ${rental.first_name} ${rental.last_name} (ID: ${rental.customer_id})`);
+        doc.text(`   Rental ID: ${rental.rental_id}, Movie Title: ${rental.title}`);
+      });
+  
+      // End the document
+      doc.end();
+    } catch (error) {
+      console.error('Error fetching rental data:', error);
+      res.status(500).json({ error: 'Error fetching rental data' });
+    }
+  });
+  
+  
+  
 
   app.get('/movies', (req, res) => {
     const q = 
@@ -233,11 +235,12 @@ app.get('/actors', (req, res) => {
   
     // SQL query to retrieve rented movies for the customer
     const query = `
-      SELECT film.film_id, film.title
-      FROM rental
-      INNER JOIN inventory ON rental.inventory_id = inventory.inventory_id
-      INNER JOIN film ON inventory.film_id = film.film_id
-      WHERE rental.customer_id = ?;
+    SELECT film.film_id, film.title
+    FROM rental
+    INNER JOIN inventory ON rental.inventory_id = inventory.inventory_id
+    INNER JOIN film ON inventory.film_id = film.film_id
+    WHERE rental.customer_id = ?
+    AND rental.return_date IS NULL;
     `;
   
     // Execute the query with the customer ID as a parameter
@@ -298,83 +301,155 @@ app.get('/actors', (req, res) => {
       });
     });
   });
-  
-// Add a new route for returning a rented movie
-app.put('/customers/:customerId/return-movie/:movieId', (req, res) => {
-  const customerId = req.params.customerId;
-  const movieId = req.params.movieId;
-
-  // Start a transaction to ensure atomicity
-  db.beginTransaction((err) => {
-    if (err) {
-      console.error('Error starting a database transaction: ' + err.stack);
-      return res.status(500).json({ error: 'Database error' });
-    }
-
-    // First, check if the rental record exists and is still rented (return_date is NULL)
-    const checkRentalQuery = `
-    SELECT rental.rental_id
-    FROM rental
-    INNER JOIN inventory ON rental.inventory_id = inventory.inventory_id
-    WHERE rental.customer_id = ${customerId}
-      AND inventory.film_id = ${movieId}
-      AND rental.return_date IS NULL;
+// Function to fetch the inventory_id
+async function fetchInventoryId(movieId, customerId) {
+  return new Promise((resolve, reject) => {
+    const fetchInventoryIdQuery = `
+      SELECT inventory_id
+      FROM inventory
+      WHERE film_id = ? AND NOT EXISTS (
+        SELECT 1 FROM rental 
+        WHERE inventory.inventory_id = rental.inventory_id 
+          AND rental.customer_id = ? 
+          AND rental.return_date IS NULL
+      )
+      LIMIT 1;
     `;
-
-    db.query(checkRentalQuery, [customerId, movieId], (rentalErr, rentalData) => {
-      if (rentalErr) {
-        console.error('Error checking rental record: ' + rentalErr.stack);
-        db.rollback(() => {
-          console.error('Transaction rolled back due to an error.');
-          return res.status(500).json({ error: 'Database error' });
-        });
-      }
-
-      if (rentalData.length === 0) {
-        // No valid rental record found
-        db.rollback(() => {
-          console.error('No valid rental record found.');
-          return res.status(404).json({ error: 'No valid rental record found' });
-        });
+    
+    db.query(fetchInventoryIdQuery, [movieId, customerId], (error, results) => {
+      if (error) {
+        reject(error);
       } else {
-        // Valid rental record found, proceed to update the return_date
-        const updateRentalQuery = `
-          UPDATE rental
-          SET return_date = NOW()
-          WHERE customer_id = ? 
-            AND inventory_id IN (SELECT inventory_id FROM inventory WHERE film_id = ?)
-            AND return_date IS NULL
-        `;
-
-        db.query(updateRentalQuery, [customerId, movieId], (updateErr, updateData) => {
-          if (updateErr) {
-            console.error('Error updating rental record: ' + updateErr.stack);
-            db.rollback(() => {
-              console.error('Transaction rolled back due to an error.');
-              return res.status(500).json({ error: 'Database error' });
-            });
-          }
-
-          // Commit the transaction if everything is successful
-          db.commit((commitErr) => {
-            if (commitErr) {
-              console.error('Error committing the transaction: ' + commitErr.stack);
-              db.rollback(() => {
-                console.error('Transaction rolled back due to an error.');
-                return res.status(500).json({ error: 'Database error' });
-              });
-            }
-
-            // Rental record updated successfully
-            res.json({ message: 'Rental record updated successfully' });
-          });
-        });
+        if (results.length > 0) {
+          resolve(results[0].inventory_id);
+        } else {
+          reject(new Error('No available inventory found.'));
+        }
       }
     });
   });
+}
+
+app.post('/new_rent', async (req, res) => {
+  try {
+    const { movieId, customerId, staffId } = req.body;
+    console.log('movieId:', movieId);
+    console.log('customerId:', customerId);
+    console.log('staffId:', staffId);
+
+    // Fetch the inventory_id for the specified movie_id in both stores
+    try {
+      const inventoryId = await fetchInventoryId(movieId, customerId);
+
+      // Log the retrieved inventoryId
+      console.log('Retrieved inventoryId:', inventoryId);
+
+      // Call insertRentalRecord with the retrieved inventoryId
+      await insertRentalRecord(inventoryId, customerId, staffId);
+
+      // Send a success response
+      res.status(200).json({ message: 'Rental record inserted successfully' });
+    } catch (error) {
+      console.error('Error fetching inventory_id or inserting rental record:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+    }
+  } catch (error) {
+    console.error('Error renting movie:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
 });
 
+async function insertRentalRecord(inventoryId, customerId, staffId) {
+  console.log('inventoryId:', inventoryId);
+  console.log('customerId:', customerId);
+  console.log('staffId:', staffId);
 
+  // Insert the new rental record using the retrieved inventory_id
+  const insertRentalQuery = `
+    INSERT INTO rental (rental_date, inventory_id, customer_id, return_date, staff_id)
+    VALUES (CURRENT_TIMESTAMP, ?, ?, NULL, ?);
+  `;
+
+  db.query(insertRentalQuery, [inventoryId, customerId, staffId], (error, results) => {
+    if (error) {
+      console.error('Error inserting rental record:', error);
+    } else {
+      console.log('Rental record inserted successfully');
+    }
+  });
+}
+  
+
+  app.put('/customers/:customerId/return-movie/:movieId', (req, res) => {
+    const customerId = req.params.customerId;
+    const movieId = req.params.movieId;
+  
+    console.log('customerId:', customerId);
+    console.log('movieId:', movieId);
+  
+    // Your SQL query to update the rental record here
+    // You can use the customerId and movieId to find the rental record and mark it as returned
+    // Example query:
+    const updateRentalQuery = `
+      UPDATE rental
+      SET return_date = NOW()
+      WHERE customer_id = ? 
+        AND inventory_id IN (SELECT inventory_id FROM inventory WHERE film_id = ?)
+        AND return_date IS NULL;
+    `;
+  
+    db.query(updateRentalQuery, [customerId, movieId], (updateErr, updateData) => {
+      if (updateErr) {
+        console.error('Error updating rental record: ' + updateErr.stack);
+        return res.status(500).json({ error: 'Database error' });
+      }
+  
+      // Check if any rows were updated (i.e., rental record marked as returned)
+      if (updateData.affectedRows === 0) {
+        return res.status(404).json({ error: 'No valid rental record found' });
+      }
+  
+      // Rental record updated successfully
+      res.json({ message: 'Rental record updated successfully' });
+    });
+  });
+  
+
+
+app.get('/customers_rents', (req, res) => {
+    // SQL query to fetch customers
+    let query = `
+    SELECT
+    customer.customer_id,
+    customer.first_name,
+    customer.last_name,
+    rental.rental_id,
+    film.film_id,
+    film.title
+  FROM
+    customer
+  LEFT JOIN
+    rental ON customer.customer_id = rental.customer_id
+  LEFT JOIN
+    inventory ON rental.inventory_id = inventory.inventory_id
+  LEFT JOIN
+    film ON inventory.film_id = film.film_id
+  WHERE
+    rental.return_date IS NULL;
+  
+
+    `;
+  
+    // Execute the query
+    db.query(query, (err, results) => {
+      if (err) {
+        console.error('Error executing query: ' + err.stack);
+        return res.status(500).json({ error: 'Database error' });
+      }
+  
+      res.json(results);
+    });
+  });
   
   // API endpoint to fetch customers
 app.get('/customers', (req, res) => {
