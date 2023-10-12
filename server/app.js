@@ -153,7 +153,7 @@ app.get('/actors/:actorId', (req, res) => {
 app.get('/movies_all', (req, res) => {
   const searchTerm = req.query.searchTerm || '';
 
-  // Implement a database query to search for movies by title, actor, or genre
+
   const query = `
     SELECT 
       film.film_id, 
@@ -359,7 +359,7 @@ console.log('inventoryId:', inventoryId);
 console.log('customerId:', customerId);
 console.log('staffId:', staffId);
 
-// Insert the new rental record using the retrieved inventory_id
+
 const insertRentalQuery = `
   INSERT INTO rental (rental_date, inventory_id, customer_id, return_date, staff_id)
   VALUES (CURRENT_TIMESTAMP, ?, ?, NULL, ?);
@@ -382,9 +382,7 @@ app.put('/customers/:customerId/return-movie/:movieId', (req, res) => {
   console.log('customerId:', customerId);
   console.log('movieId:', movieId);
 
-  // Your SQL query to update the rental record here
-  // You can use the customerId and movieId to find the rental record and mark it as returned
-  // Example query:
+
   const updateRentalQuery = `
     UPDATE rental
     SET return_date = NOW()
@@ -399,7 +397,7 @@ app.put('/customers/:customerId/return-movie/:movieId', (req, res) => {
       return res.status(500).json({ error: 'Database error' });
     }
 
-    // Check if any rows were updated (i.e., rental record marked as returned)
+
     if (updateData.affectedRows === 0) {
       return res.status(404).json({ error: 'No valid rental record found' });
     }
@@ -515,11 +513,11 @@ app.post('/add-customer', (req, res) => {
   });
 });
 
-// In your Express server code, add the following route for customer editing:
+
 
 app.put('/customers/:customerId/edit', (req, res) => {
   const customerId = req.params.customerId;
-  const { first_name, last_name, email } = req.body; // Extract data from the request body
+  const { first_name, last_name, email } = req.body; 
 
   // Update the customer information in the database
   const updateQuery = 'UPDATE customer SET first_name = ?, last_name = ?, email = ? WHERE customer_id = ?';
